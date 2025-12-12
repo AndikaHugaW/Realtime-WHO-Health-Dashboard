@@ -6,6 +6,7 @@ import HealthChart from './HealthChart';
 import HealthBarChart from './HealthBarChart';
 import CategoryDistribution from './CategoryDistribution';
 import HealthTrendChart from './HealthTrendChart';
+import WorldMap from './WorldMap';
 import RecentHealthUpdates from './RecentHealthUpdates';
 import OutbreakAlerts from './OutbreakAlerts';
 import CountryComparison from './CountryComparison';
@@ -142,6 +143,11 @@ export default function HealthDashboard({ recentUpdates }: DashboardProps) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <RecentHealthUpdates updates={recentUpdates} />
         <OutbreakAlerts />
+      </div>
+
+      {/* World Map */}
+      <div className="grid grid-cols-1 gap-6">
+        <WorldMap indicators={indicators} />
       </div>
 
       {/* Country Comparison */}
