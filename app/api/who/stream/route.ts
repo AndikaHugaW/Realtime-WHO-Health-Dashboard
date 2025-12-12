@@ -1,7 +1,10 @@
 import { NextRequest } from 'next/server';
 import { realtimeEmitter } from '@/lib/realtime';
-import { generateMockUpdate } from '@/lib/who-api';
+import { WHO_API, generateMockUpdate, type WHOUpdateEvent } from '@/lib/who-api';
 import { prisma } from '@/lib/prisma';
+
+// Store previous values to detect changes
+const previousValues = new Map<string, number>();
 
 export async function GET(request: NextRequest) {
   const encoder = new TextEncoder();
@@ -22,44 +25,114 @@ export async function GET(request: NextRequest) {
 
       realtimeEmitter.on('health-update', onHealthUpdate);
 
-      // Simulate real-time updates every 5 seconds
+      // Fetch and process real WHO API data every 5 seconds
       const interval = setInterval(async () => {
-        const update = generateMockUpdate();
-        
-        // Save to database
-        const indicator = await prisma.healthIndicator.findFirst({
-          where: {
-            country: update.country,
-            indicator: update.indicator,
-          },
-          orderBy: { date: 'desc' },
-        });
+        try {
+          // Fetch real data from WHO API
+          const healthData = await WHO_API.getHealthIndicators();
+          
+          if (healthData && healthData.length > 0) {
+            // Process each indicator to detect changes
+            for (const data of healthData) {
+              const key = `${data.country}-${data.indicator}`;
+              const previousValue = previousValues.get(key);
+              const currentValue = data.value;
+              
+              // Calculate change (0 if no previous value)
+              const change = previousValue !== undefined ? currentValue - previousValue : 0;
+              
+              // Emit update if value changed or if it's the first time (initial data)
+              if (previousValue === undefined || previousValue !== currentValue) {
+                // Create update event
+                const update: WHOUpdateEvent = {
+                  country: data.country,
+                  indicator: data.indicator,
+                  value: currentValue,
+                  change: change,
+                  timestamp: Math.floor(Date.now() / 1000),
+                };
 
-        if (indicator) {
-          // Update existing indicator
-          await prisma.healthIndicator.update({
-            where: { id: indicator.id },
-            data: {
-              value: update.value,
-              date: new Date(),
-            },
-          });
+                try {
+                  // Save to database
+                  const indicator = await prisma.healthIndicator.findFirst({
+                    where: {
+                      country: data.country,
+                      indicator: data.indicator,
+                    },
+                    orderBy: { date: 'desc' },
+                  });
 
-          // Create update record
-          await prisma.healthUpdate.create({
-            data: {
-              indicatorId: indicator.id,
-              country: update.country,
-              indicatorName: update.indicator,
-              value: update.value,
-              change: update.change,
-              timestamp: update.timestamp,
-            },
-          });
+                  if (indicator) {
+                    // Update existing indicator
+                    await prisma.healthIndicator.update({
+                      where: { id: indicator.id },
+                      data: {
+                        value: currentValue,
+                        category: data.category,
+                        date: new Date(data.date),
+                        isAlert: data.isAlert,
+                      },
+                    });
+
+                    // Create update record
+                    await prisma.healthUpdate.create({
+                      data: {
+                        indicatorId: indicator.id,
+                        country: data.country,
+                        indicatorName: data.indicator,
+                        value: currentValue,
+                        change: change,
+                        timestamp: update.timestamp,
+                      },
+                    });
+                  } else {
+                    // Create new indicator
+                    const newIndicator = await prisma.healthIndicator.create({
+                      data: {
+                        country: data.country,
+                        indicator: data.indicator,
+                        value: currentValue,
+                        category: data.category,
+                        date: new Date(data.date),
+                        isAlert: data.isAlert,
+                      },
+                    });
+
+                    // Create update record
+                    await prisma.healthUpdate.create({
+                      data: {
+                        indicatorId: newIndicator.id,
+                        country: data.country,
+                        indicatorName: data.indicator,
+                        value: currentValue,
+                        change: change,
+                        timestamp: update.timestamp,
+                      },
+                    });
+                  }
+                } catch (dbError: any) {
+                  // Database might not be migrated - continue anyway
+                  console.log('Database operation failed:', dbError.message);
+                }
+
+                // Emit real-time update
+                realtimeEmitter.emit('health-update', update);
+              }
+              
+              // Always update previous value for change detection
+              previousValues.set(key, currentValue);
+            }
+          } else {
+            // If no real data, fallback to mock update (for demonstration)
+            const update = generateMockUpdate();
+            realtimeEmitter.emit('health-update', update);
+          }
+        } catch (error: any) {
+          console.error('Error fetching WHO API data:', error.message);
+          // Fallback to mock data if WHO API fails
+          const update = generateMockUpdate();
+          realtimeEmitter.emit('health-update', update);
         }
-
-        // Emit real-time update
-        realtimeEmitter.emit('health-update', update);
       }, 5000);
 
       // Cleanup on close
