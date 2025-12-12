@@ -1,0 +1,62 @@
+// WHO Health Data Schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model HealthIndicator {
+  id            String    @id @default(uuid())
+  country       String
+  indicator     String    // e.g., "Total Cases", "Deaths", "Recovered"
+  value         Float
+  category      String    // e.g., "disease", "vaccination", "mortality"
+  date          DateTime
+  isAlert       Boolean   @default(false)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  updates       HealthUpdate[]
+  
+  @@map("health_indicators")
+  @@index([country])
+  @@index([indicator])
+  @@index([date])
+}
+
+model HealthUpdate {
+  id              String          @id @default(uuid())
+  indicatorId     String          @map("indicator_id")
+  indicator       HealthIndicator @relation(fields: [indicatorId], references: [id], onDelete: Cascade)
+  country         String
+  indicatorName   String          @map("indicator_name")
+  value           Float
+  change          Float           // Change from previous value
+  timestamp       Int             // Unix timestamp
+  createdAt       DateTime        @default(now()) @map("created_at")
+  
+  @@map("health_updates")
+  @@index([indicatorId])
+  @@index([timestamp])
+  @@index([country])
+}
+
+model OutbreakAlert {
+  id          String    @id @default(uuid())
+  disease     String
+  country     String
+  severity    String    // "low", "medium", "high", "critical"
+  cases       Int
+  status      String    @default("active") // "active", "contained", "resolved"
+  reportedAt  DateTime  @map("reported_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  
+  @@map("outbreak_alerts")
+  @@index([severity])
+  @@index([status])
+  @@index([country])
+}
